@@ -12,9 +12,11 @@ app = FastAPI()
 # Configura CORS (¡Añade esto antes de tus rutas!)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Exactamente la URL de tu frontend
-    allow_methods=["POST"],  # Solo permite POST
+    allow_origins=["*"],  
+    allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    allow_credentials=True
 )
 
 # Carga el modelo YOLO (ajusta la ruta)
