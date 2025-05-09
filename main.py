@@ -1,71 +1,119 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware  # ¡Nueva importación!
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
 from ultralytics import YOLO
 import io
-from fastapi.responses import JSONResponse
+import logging
+from typing import Optional
 
 app = FastAPI()
 
-# Configura CORS (¡Añade esto antes de tus rutas!)
+# Configuración avanzada de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
-    allow_methods=["*"],
+    allow_origins=["*"],  # Permite temporalmente todos los orígenes
+    allow_methods=["POST", "GET"],
     allow_headers=["*"],
-    expose_headers=["*"],
-    allow_credentials=True
+    expose_headers=["Content-Disposition"],
+    max_age=600
 )
 
-# Carga el modelo YOLO (ajusta la ruta)
-#modelo = YOLO(r"C:\Users\juans\Documents\CodigosGrado\segmentacion_yoda\runs\segment\train16\weights\best.pt")
-modelo = YOLO("best.pt")
+# Configura logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Carga del modelo con verificación
+try:
+    logger.info("⏳ Cargando modelo YOLO...")
+    modelo = YOLO("best.pt", device="cpu")  # Fuerza uso de CPU
+    logger.info("✅ Modelo cargado exitosamente")
+except Exception as e:
+    logger.error(f"❌ Error cargando el modelo: {str(e)}")
+    raise RuntimeError("No se pudo cargar el modelo YOLO") from e
 
 
-# Ruta raíz obligatoria
 @app.get("/")
-def home():
-    return JSONResponse(content={"status": "API activa"}, status_code=200)
+def health_check():
+    return JSONResponse(
+        content={
+            "status": "API activa",
+            "modelo": "cargado" if modelo else "no cargado"
+        },
+        status_code=200
+    )
+
 
 @app.post("/segment-leaf")
 async def segment_leaf(file: UploadFile = File(...)):
-    # 1. Leer la imagen del request
-    contents = await file.read()
-    imagen = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+    try:
+        logger.info(f"📥 Recibiendo archivo: {file.filename}")
 
-    # 2. Realizar predicción con YOLO
-    resultados = modelo.predict(imagen, imgsz=640)
+        # Verificación básica del archivo
+        if not file.content_type.startswith('image/'):
+            raise HTTPException(400, "Solo se permiten imágenes")
 
-    # 3. Procesar máscaras (código adaptado del tuyo)
-    if hasattr(resultados[0], "masks") and resultados[0].masks is not None:
+        contents = await file.read()
+        logger.info(f"📏 Tamaño de imagen recibida: {len(contents) / 1024:.2f} KB")
+
+        # Decodificación robusta de la imagen
+        nparr = np.frombuffer(contents, np.uint8)
+        imagen = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if imagen is None:
+            logger.error("⚠️ No se pudo decodificar la imagen")
+            raise HTTPException(400, "Formato de imagen no soportado")
+
+        logger.info(f"🖼️ Dimensión de imagen: {imagen.shape}")
+
+        # Procesamiento con YOLO
+        logger.info("🔍 Ejecutando predicción...")
+        resultados = modelo.predict(
+            imagen,
+            imgsz=640,
+            conf=0.25,  # Ajusta según necesites
+            device="cpu"
+        )
+        logger.info("🎯 Predicción completada")
+
+        # Procesamiento de máscaras
+        if not hasattr(resultados[0], "masks") or resultados[0].masks is None:
+            logger.warning("⚠️ No se detectaron máscaras")
+            raise HTTPException(400, "No se detectaron objetos en la imagen")
+
         mascaras = resultados[0].masks.data.cpu().numpy()
+        logger.info(f"🔄 Procesando {len(mascaras)} máscaras...")
 
         # Encontrar máscara más grande
-        mascara_mas_grande = None
-        area_maxima = 0
+        mascara_mas_grande = max(
+            ((m * 255).astype("uint8") for m in mascaras),
+            key=lambda m: cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0].size,
+            default=None
+        )
 
-        for mascara in mascaras:
-            mascara_uint8 = (mascara * 255).astype("uint8")
-            contornos, _ = cv2.findContours(mascara_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for contorno in contornos:
-                area = cv2.contourArea(contorno)
-                if area > area_maxima:
-                    area_maxima = area
-                    mascara_mas_grande = mascara_uint8
+        if mascara_mas_grande is None:
+            logger.warning("⚠️ Máscara más grande no encontrada")
+            raise HTTPException(400, "No se pudo segmentar la imagen")
 
-        if mascara_mas_grande is not None:
-            # Aplicar máscara a la imagen original
-            mascara_redimensionada = cv2.resize(mascara_mas_grande, (imagen.shape[1], imagen.shape[0]))
-            overlay = np.zeros_like(imagen, dtype=np.uint8)
-            overlay[np.where(mascara_redimensionada > 0)] = (0, 255, 0)  # Verde
-            imagen_segmentada = cv2.addWeighted(imagen, 0.5, overlay, 0.5, 0)
+        # Aplicar máscara
+        mascara_rsz = cv2.resize(mascara_mas_grande, (imagen.shape[1], imagen.shape[0]))
+        overlay = np.zeros_like(imagen)
+        overlay[np.where(mascara_rsz > 0)] = (0, 255, 0)  # Verde
+        imagen_segmentada = cv2.addWeighted(imagen, 0.7, overlay, 0.3, 0)
 
-            # Convertir a bytes para la respuesta
-            _, img_encoded = cv2.imencode(".png", imagen_segmentada)
-            return StreamingResponse(io.BytesIO(img_encoded), media_type="image/png")
+        # Codificar respuesta
+        _, img_encoded = cv2.imencode(".png", imagen_segmentada)
+        logger.info("✅ Procesamiento completado")
 
-    # Si no hay máscaras, devolver la imagen original
-    _, img_encoded = cv2.imencode(".png", imagen)
-    return StreamingResponse(io.BytesIO(img_encoded), media_type="image/png")
+        return StreamingResponse(
+            io.BytesIO(img_encoded),
+            media_type="image/png",
+            headers={"Content-Disposition": f"attachment; filename=segmentada.png"}
+        )
+
+    except HTTPException:
+        raise  # Re-lanza las excepciones HTTP que ya manejamos
+    except Exception as e:
+        logger.error(f"🔥 Error crítico: {str(e)}", exc_info=True)
+        raise HTTPException(500, "Error interno procesando la imagen") from e
