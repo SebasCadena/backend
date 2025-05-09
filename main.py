@@ -6,6 +6,7 @@ import numpy as np
 from ultralytics import YOLO
 import io
 import logging
+import torch
 from typing import Optional
 
 app = FastAPI()
@@ -27,7 +28,8 @@ logger = logging.getLogger(__name__)
 # Carga del modelo con verificación
 try:
     logger.info("⏳ Cargando modelo YOLO...")
-    modelo = YOLO("best.pt", device="cpu")  # Fuerza uso de CPU
+    modelo = YOLO("best.pt")
+    torch.device('cpu') 
     logger.info("✅ Modelo cargado exitosamente")
 except Exception as e:
     logger.error(f"❌ Error cargando el modelo: {str(e)}")
