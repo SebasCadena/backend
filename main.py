@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import io
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
@@ -19,6 +20,12 @@ app.add_middleware(
 # Carga el modelo YOLO (ajusta la ruta)
 #modelo = YOLO(r"C:\Users\juans\Documents\CodigosGrado\segmentacion_yoda\runs\segment\train16\weights\best.pt")
 modelo = YOLO("best.pt")
+
+
+# Ruta raíz obligatoria
+@app.get("/")
+def home():
+    return JSONResponse(content={"status": "API activa"}, status_code=200)
 
 @app.post("/segment-leaf")
 async def segment_leaf(file: UploadFile = File(...)):
