@@ -14,11 +14,11 @@ app = FastAPI()
 # Configuración avanzada de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permite temporalmente todos los orígenes
-    allow_methods=["POST", "GET"],
+    allow_origins=["http://localhost:5173", "https://tu-app.web.app"],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
-    max_age=600
+    allow_credentials=True
 )
 
 # Configura logging
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 try:
     logger.info("⏳ Cargando modelo YOLO...")
     modelo = YOLO("best.pt")
-    torch.device('cpu') 
+    torch.device('cpu')
     logger.info("✅ Modelo cargado exitosamente")
 except Exception as e:
     logger.error(f"❌ Error cargando el modelo: {str(e)}")
@@ -74,8 +74,9 @@ async def segment_leaf(file: UploadFile = File(...)):
         resultados = modelo.predict(
             imagen,
             imgsz=640,
-            conf=0.25,  # Ajusta según necesites
-            device="cpu"
+            conf=0.4,  # Ajusta según necesites
+            device="cpu",
+            half = False
         )
         logger.info("🎯 Predicción completada")
 
