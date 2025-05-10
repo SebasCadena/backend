@@ -14,9 +14,12 @@ app = FastAPI()
 # Configuración avanzada de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_methods=["POST"],
-    allow_headers=["*"]
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    allow_credentials=True,
+    max_age=3600
 )
 
 # Configura logging
@@ -37,26 +40,38 @@ except Exception as e:
 @app.post("/test-image")
 async def test_image(file: UploadFile = File(...)):
     try:
-        # 1. Leer imagen
+        print("🔍 Recibiendo imagen...")
         contents = await file.read()
+
+        # Verifica el tamaño
+        if len(contents) > 2 * 1024 * 1024:  # 2MB máximo
+            raise HTTPException(413, "Imagen demasiado grande (máx 2MB)")
+
         img = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
-
         if img is None:
-            raise HTTPException(400, "Formato de imagen no válido")
+            raise HTTPException(400, "Formato de imagen no soportado")
 
-        # 2. Operación simple: Convertir a escala de grises
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, img_encoded = cv2.imencode(".png", gray)
+        print(f"🖼️ Procesando imagen: {img.shape[1]}x{img.shape[0]}")
 
-        # 3. Devolver imagen procesada
+        # Operación simple: espejo horizontal
+        processed_img = cv2.flip(img, 1)
+
+        _, img_encoded = cv2.imencode(".png", processed_img)
+
         return StreamingResponse(
             io.BytesIO(img_encoded),
             media_type="image/png",
-            headers={"Access-Control-Allow-Origin": "http://localhost:5173"}
+            headers={
+                "Access-Control-Allow-Origin": "http://localhost:5173",
+                "X-Process-Time": "0.1s"
+            }
         )
 
     except Exception as e:
-        raise HTTPException(500, f"Error: {str(e)}")
+        print(f"🔥 Error: {str(e)}")
+        raise HTTPException(500, str(e))
+
+    
 @app.get("/")
 def health_check():
     return JSONResponse(
