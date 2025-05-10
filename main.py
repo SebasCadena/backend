@@ -14,11 +14,9 @@ app = FastAPI()
 # Configuración avanzada de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://tu-app.web.app"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
-    allow_credentials=True
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["POST"],
+    allow_headers=["*"]
 )
 
 # Configura logging
@@ -36,6 +34,29 @@ except Exception as e:
     raise RuntimeError("No se pudo cargar el modelo YOLO") from e
 
 
+@app.post("/test-image")
+async def test_image(file: UploadFile = File(...)):
+    try:
+        # 1. Leer imagen
+        contents = await file.read()
+        img = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+
+        if img is None:
+            raise HTTPException(400, "Formato de imagen no válido")
+
+        # 2. Operación simple: Convertir a escala de grises
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, img_encoded = cv2.imencode(".png", gray)
+
+        # 3. Devolver imagen procesada
+        return StreamingResponse(
+            io.BytesIO(img_encoded),
+            media_type="image/png",
+            headers={"Access-Control-Allow-Origin": "http://localhost:5173"}
+        )
+
+    except Exception as e:
+        raise HTTPException(500, f"Error: {str(e)}")
 @app.get("/")
 def health_check():
     return JSONResponse(
