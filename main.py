@@ -3,7 +3,6 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
-from oauthlib.uri_validate import segment
 from ultralytics import YOLO
 import io
 import logging
