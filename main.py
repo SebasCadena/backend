@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
+from oauthlib.uri_validate import segment
 from ultralytics import YOLO
 import io
 import logging
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Carga del modelo con verificación
 try:
     logger.info("⏳ Cargando modelo YOLO...")
-    modelo = YOLO("best.pt")
+    modelo = YOLO("best.pt", task=segment, type='v8')
     torch.device('cpu')
     logger.info("✅ Modelo cargado exitosamente")
 except Exception as e:
